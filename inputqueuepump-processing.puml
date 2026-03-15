@@ -1,0 +1,64 @@
+@startuml InputQueuePump_Processing
+
+participant "PumpLoop" as PL
+participant "InputQueuePump" as IQP
+participant "Renewal" as R
+participant "TimeProvider" as TP
+participant "IAmazonSQS" as SQS
+participant "MessagePipeline" as MP
+
+PL -> SQS : ReceiveMessageAsync()
+SQS --> PL : messages[]
+
+PL -> PL : visibilityExpiresOn =\n  UtcNow + visibilityTimeout
+
+loop for each message
+
+    PL -> IQP : ProcessMessageWithVisibilityRenewal(\n  message, visibilityExpiresOn,\n  timeProvider, ct)
+
+    activate IQP
+
+    IQP -> IQP : renewalCTS =\n  LinkedTokenSource(ct)
+    IQP -> IQP : renewalCTS.CancelAfter(\n  maxAutoRenewalDuration)
+    IQP -> IQP : visibilityLostCTS =\n  LinkedTokenSource(ct)
+
+    IQP -> R : RenewMessageVisibility(\n  message, expiresOn,\n  visibilityTimeout, sqsClient,\n  queueUrl, visibilityLostCTS,\n  timeProvider, renewalCTS.Token)
+    activate R
+
+    note over R
+        Renewal loop runs
+        concurrently with
+        message processing
+    end note
+
+    IQP -> MP : ProcessMessage(\n  message,\n  visibilityLostCTS.Token)
+    activate MP
+
+    ... message processing ...
+
+    MP --> IQP : processing complete
+    deactivate MP
+
+    IQP -> IQP : renewalCTS.CancelAsync()
+
+    note right
+        Cancelling stops
+        the renewal loop
+    end note
+
+    R --> IQP : Result.Stopped
+    deactivate R
+
+    alt processing failed AND renewal did not fail
+        IQP -> SQS : ChangeMessageVisibility(\n  visibilityTimeout: 0)
+        note right
+            Return message
+            to queue
+        end note
+    end
+
+    deactivate IQP
+
+end
+
+@enduml

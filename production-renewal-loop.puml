@@ -1,0 +1,52 @@
+@startuml Production_Renewal_Loop
+
+participant "InputQueuePump" as Pump
+participant "Renewal" as R
+participant "TimeProvider.System" as TP
+participant "IAmazonSQS" as SQS
+participant "Task.Delay" as Delay
+
+Pump -> R : RenewMessageVisibility(\n  message, visibilityExpiresOn,\n  visibilityTimeoutInSeconds,\n  sqsClient, inputQueueUrl,\n  tokenSource, timeProvider)
+
+activate R
+
+loop while !cancellationToken.IsCancellationRequested
+
+    R -> R : CalculateRenewalTime(\n  visibilityExpiresOn, timeProvider)
+    R -> TP : GetUtcNow()
+    TP --> R : currentTime
+
+    R -> R : remainingTime = expiresOn - currentTime\nbuffer = min(remaining/2, 10s)\nrenewAfter = remaining - buffer
+
+    R -> Delay : Task.Delay(renewAfter, timeProvider, ct)
+
+    note right of Delay
+        Internally calls
+        timeProvider.CreateTimer()
+        which creates a real OS timer
+    end note
+
+    Delay -> TP : CreateTimer(callback, state,\n  dueTime, period)
+    TP --> Delay : ITimer
+
+    ... renewAfter elapses ...
+
+    Delay --> R : delay completed
+
+    R -> TP : GetUtcNow()
+    TP --> R : currentTime
+
+    R -> R : calculatedVisibilityTimeout =\n  max(|remaining| + visibilityTimeout,\n  visibilityTimeout)
+
+    R -> R : visibilityExpiresOn =\n  currentTime + calculatedVisibilityTimeout
+
+    R -> SQS : ChangeMessageVisibilityAsync(\n  queueUrl, receiptHandle,\n  calculatedVisibilityTimeout)
+    SQS --> R : success
+
+end
+
+R --> Pump : Result.Stopped
+
+deactivate R
+
+@enduml

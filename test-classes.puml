@@ -1,0 +1,49 @@
+@startuml Test_ClassDiagram
+
+skinparam classAttributeIconSize 0
+skinparam classFontSize 12
+
+package "NServiceBus.Transport.SQS.Tests" {
+
+    class RenewalTests <<TestFixture>> {
+        + Should_calculate_correctly(renewalTime, expected) : void
+        + Should_return_zero_delay_for_remaining_time_smaller_than_minimum_threshold() : void
+        + Should_renew_until_cancelled_according_to_renewal_time() : Task
+        + Should_not_renew_when_time_passed_below_renewal_time() : Task
+        + Should_renew_when_expired_but_below_threshold() : Task
+        + Should_renew_when_expired_but_below_buffer() : Task
+        + Should_notify_about_visibility_extension_failing() : Task
+        + Should_indicate_stopped_when_cancelled_from_beginning() : Task
+    }
+
+    class SignalingFakeTimeProvider {
+        - _nextTimerRegistered : TaskCompletionSource <<volatile>>
+        --
+        + WaitForNextTimer() : Task
+        + CreateTimer(callback, state, dueTime, period) : ITimer
+    }
+
+    class MockSqsClient {
+        + ChangeMessageVisibilityRequestsSent : List<ChangeMessageVisibilityRequest>
+        + ChangeMessageVisibilityRequestResponse : Func<...>
+        --
+        + ChangeMessageVisibilityAsync(request, ct) : Task<Response>
+    }
+}
+
+package "Microsoft.Extensions.Time.Testing" {
+    class FakeTimeProvider
+}
+
+package "Amazon.SQS" {
+    interface IAmazonSQS
+}
+
+RenewalTests +-- SignalingFakeTimeProvider : <<nested>>
+SignalingFakeTimeProvider --|> FakeTimeProvider
+MockSqsClient ..|> IAmazonSQS
+RenewalTests --> SignalingFakeTimeProvider : <<creates>>
+RenewalTests --> MockSqsClient : <<creates>>
+RenewalTests --> FakeTimeProvider : <<creates>>
+
+@enduml

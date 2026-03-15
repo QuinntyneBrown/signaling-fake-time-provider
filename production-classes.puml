@@ -1,0 +1,61 @@
+@startuml Production_ClassDiagram
+
+skinparam classAttributeIconSize 0
+skinparam classFontSize 12
+
+package "NServiceBus.Transport.SQS" {
+
+    class Renewal <<static>> {
+        - {static} MaximumRenewBufferDuration : TimeSpan
+        - {static} Logger : ILog
+        --
+        + {static} RenewMessageVisibility(receivedMessage, visibilityExpiresOn,\n    visibilityTimeoutInSeconds, sqsClient, inputQueueUrl,\n    messageVisibilityLostCancellationTokenSource,\n    timeProvider, cancellationToken) : Task<Result>
+        + {static} CalculateRenewalTime(visibilityTimeExpiresOn,\n    timeProvider) : TimeSpan
+    }
+
+    enum "Renewal.Result" as RenewalResult {
+        Failed
+        Stopped
+    }
+
+    class InputQueuePump {
+        - inputQueueUrl : string
+        - visibilityTimeoutInSeconds : int
+        - maxAutoMessageVisibilityRenewalDuration : TimeSpan
+        --
+        + Initialize(limitations, onMessage, onError, ct) : Task
+        + StartReceive(ct) : Task
+        + StopReceive(ct) : Task
+        + ChangeConcurrency(limitations, ct) : Task
+        ~ ProcessMessageWithVisibilityRenewal(receivedMessage,\n    visibilityExpiresOn, timeProvider, ct) : Task
+        ~ ProcessMessage(receivedMessage, ct) : Task
+    }
+
+    interface IMessageReceiver {
+        + Initialize(limitations, onMessage, onError, ct) : Task
+        + StartReceive(ct) : Task
+        + StopReceive(ct) : Task
+    }
+}
+
+package "Amazon.SQS" {
+    interface IAmazonSQS {
+        + ChangeMessageVisibilityAsync(request, ct) : Task<Response>
+        + ReceiveMessageAsync(request, ct) : Task<Response>
+        + DeleteMessageAsync(queueUrl, receiptHandle, ct) : Task<Response>
+    }
+}
+
+package "System" {
+    abstract class TimeProvider
+}
+
+Renewal ..> RenewalResult : <<returns>>
+Renewal ..> IAmazonSQS : <<uses>>
+Renewal ..> TimeProvider : <<uses>>
+InputQueuePump ..|> IMessageReceiver
+InputQueuePump --> Renewal : delegates renewal to
+InputQueuePump ..> TimeProvider : <<uses>>
+InputQueuePump ..> IAmazonSQS : <<uses>>
+
+@enduml

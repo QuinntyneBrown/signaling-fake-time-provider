@@ -1,0 +1,39 @@
+@startuml Renewal_Error_Handling
+
+participant "Renewal Loop" as R
+participant "IAmazonSQS" as SQS
+participant "visibilityLostCTS" as VLCTS
+
+R -> SQS : ChangeMessageVisibilityAsync()
+
+alt Success
+    SQS --> R : OK
+    R -> R : Update visibilityExpiresOn\nContinue loop
+
+else ReceiptHandleIsInvalidException
+    SQS --> R : ReceiptHandleIsInvalidException
+    R -> VLCTS : CancelAsync()
+    note right
+        Signals that message visibility
+        is lost. Processing should stop.
+    end note
+    R --> R : return Result.Failed
+
+else AmazonSQSException (visibility expired)
+    SQS --> R : AmazonSQSException\n(IsCausedByMessageVisibilityExpiry)
+    R -> VLCTS : CancelAsync()
+    R --> R : return Result.Failed
+
+else OperationCanceledException
+    note right of R
+        Cancellation was requested
+        (message processing completed)
+    end note
+    R --> R : return Result.Stopped
+
+else Other Exception
+    SQS --> R : unexpected exception
+    R --> R : return Result.Failed
+end
+
+@enduml

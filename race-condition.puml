@@ -1,0 +1,62 @@
+@startuml Race_Condition
+
+actor "Test" as Test
+participant "FakeTimeProvider\n(without signaling)" as FTP
+participant "Renewal Loop" as R
+participant "Task.Delay\n(internals)" as Delay
+
+== The Problem ==
+
+Test -> R : RenewMessageVisibility(...)
+activate R
+
+R -> Delay : Task.Delay(5s, fakeTP, ct)
+Delay -> FTP : CreateTimer(5s)
+FTP --> Delay : ITimer
+
+Test -> FTP : Advance(5 seconds)
+FTP --> R : timer fires, delay completes
+
+R -> R : ChangeMessageVisibilityAsync()\n(awaiting SQS call)
+
+note right of Test #FFAAAA
+  **RACE CONDITION**
+  Test advances time again
+  BEFORE the renewal loop
+  has registered the next timer!
+end note
+
+Test -> FTP : Advance(5 seconds)
+
+note right of FTP #FFAAAA
+  No timer is registered yet!
+  This advance does nothing
+  to the renewal loop.
+end note
+
+R -> R : CalculateRenewalTime()
+R -> Delay : Task.Delay(renewAfter, fakeTP, ct)
+Delay -> FTP : CreateTimer(renewAfter)
+
+note right of FTP #FFAAAA
+  Timer registered AFTER
+  the second Advance().
+  It will never fire because
+  the test already advanced
+  past its due time.
+end note
+
+R -> R : test hangs or\nproduces incorrect results
+
+deactivate R
+
+== The Solution: SignalingFakeTimeProvider ==
+
+note over Test, Delay #AAFFAA
+  With SignalingFakeTimeProvider, the test calls
+  WaitForNextTimer() before Advance(), then awaits
+  the returned Task. This guarantees the next timer
+  is registered before the test proceeds.
+end note
+
+@enduml

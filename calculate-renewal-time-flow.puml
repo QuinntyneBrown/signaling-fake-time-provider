@@ -1,0 +1,26 @@
+@startuml CalculateRenewalTime_Flow
+
+participant "Caller" as C
+participant "Renewal" as R
+participant "TimeProvider" as TP
+
+C -> R : CalculateRenewalTime(\n  visibilityTimeExpiresOn,\n  timeProvider)
+
+activate R
+
+R -> TP : GetUtcNow()
+TP --> R : utcNow
+
+R -> R : remainingTime =\n  visibilityTimeExpiresOn - utcNow
+
+alt remainingTime < 400ms
+    R --> C : TimeSpan.Zero\n(immediate renewal)
+else remainingTime >= 400ms
+    R -> R : buffer = min(\n  remainingTime / 2,\n  MaximumRenewBufferDuration(10s))
+    R -> R : renewAfter =\n  remainingTime - buffer
+    R --> C : renewAfter
+end
+
+deactivate R
+
+@enduml

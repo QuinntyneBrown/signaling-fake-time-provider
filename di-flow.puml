@@ -1,0 +1,47 @@
+@startuml DI_Flow
+
+skinparam classAttributeIconSize 0
+
+package "Production Runtime" {
+    class "TimeProvider.System" as SystemTP
+}
+
+package "Test Runtime" {
+    class FakeTimeProvider
+    class SignalingFakeTimeProvider
+}
+
+package "Consumer" {
+    class Renewal <<static>>
+    class InputQueuePump
+}
+
+abstract class TimeProvider
+
+SystemTP --|> TimeProvider
+FakeTimeProvider --|> TimeProvider
+SignalingFakeTimeProvider --|> FakeTimeProvider
+
+InputQueuePump ..> Renewal : calls
+InputQueuePump ..> TimeProvider : "timeProvider ?? TimeProvider.System"
+Renewal ..> TimeProvider : "timeProvider ?? TimeProvider.System"
+
+note right of SystemTP
+  Used in production.
+  Real wall-clock time
+  and real timers.
+end note
+
+note right of SignalingFakeTimeProvider
+  Used in tests requiring
+  multi-step timer
+  synchronization.
+end note
+
+note right of FakeTimeProvider
+  Used in simpler tests
+  that don't need timer
+  signaling.
+end note
+
+@enduml
